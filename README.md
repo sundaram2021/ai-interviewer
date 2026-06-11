@@ -4,7 +4,9 @@ An elegant, latency-optimized, and fully automated voice-based technical intervi
 
 Built with **Next.js (App Router)**, **DeepSeek** via Vercel AI SDK Gateway, **Supermemory** for contextual candidate profile memory, **Sarvam AI** for speech synthesis and transcription, and **Exa** for GitHub profile scraping.
 
----
+## Supermemory User Profile
+<img width="1581" height="811" alt="image" src="https://github.com/user-attachments/assets/bbbfc3d5-f03c-424d-8279-f2120bdfbce0" />
+
 
 ## Architecture Flow
 
@@ -50,7 +52,6 @@ graph TD
     style N fill:#064e3b,stroke:#10b981,color:#ecfdf5
 ```
 
----
 
 ## Tech Stack & Core Integrations
 
@@ -62,7 +63,6 @@ graph TD
 4. **Exa (GitHub Scraper)**: Scrapes the candidate's GitHub profile and README to extract repository details and dominant languages.
 5. **Next.js & React (Frontend & Server Routes)**: Implements smooth state management, audio capture, and API routing.
 
----
 
 ## API Routes & Tools Usage
 
@@ -114,7 +114,6 @@ This is a dual-mode endpoint handling voice processing via Sarvam AI.
   - **Payload**: `Application/JSON` containing `{ "text": "..." }`
   - **Returns**: `{ "audio": "BASE64_ENCODED_AUDIO" }`
 
----
 
 ## Client Hooks
 
@@ -128,7 +127,6 @@ This is a dual-mode endpoint handling voice processing via Sarvam AI.
   - Decodes and plays back the audio string returned from Sarvam AI.
   - Integrates standard browser-based `speechSynthesis` as a graceful fallback if the network or API fails.
 
----
 
 ## Setup & Local Installation
 
