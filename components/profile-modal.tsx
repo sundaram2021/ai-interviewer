@@ -1,10 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Upload, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface ProfileModalProps {
-  onComplete: (userId: string) => void;
+  onComplete: (profile: {
+    userId: string;
+    profile: string;
+    candidateName: string;
+    targetRole: string;
+  }) => void;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -12,15 +17,15 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export function ProfileModal({ onComplete }: ProfileModalProps) {
-  const [file, setFile] = useState<File | null>(null);
+  const [role, setRole] = useState('');
   const [githubUrl, setGithubUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !githubUrl) {
-      setError('Please provide both a resume and a GitHub profile URL.');
+    if (!role.trim() || !githubUrl.trim()) {
+      setError('Please provide a target role and a GitHub username or URL.');
       return;
     }
 
@@ -29,8 +34,8 @@ export function ProfileModal({ onComplete }: ProfileModalProps) {
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
-      formData.append('githubUrl', githubUrl);
+      formData.append('role', role.trim());
+      formData.append('githubUrl', githubUrl.trim());
 
       const res = await fetch('/api/analyze', {
         method: 'POST',
@@ -40,7 +45,12 @@ export function ProfileModal({ onComplete }: ProfileModalProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to process profile');
 
-      onComplete(data.userId);
+      onComplete({
+        userId: data.userId,
+        profile: data.profile,
+        candidateName: data.candidateName || 'Candidate',
+        targetRole: data.targetRole || role.trim(),
+      });
     } catch (err: unknown) {
       setError(getErrorMessage(err, 'An error occurred during profiling.'));
     } finally {
@@ -52,35 +62,31 @@ export function ProfileModal({ onComplete }: ProfileModalProps) {
     <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-50 p-4">
       <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
         <h2 className="text-xl font-medium text-zinc-100 mb-2">
-          Create Candidate Profile
+          Set Up the Interview
         </h2>
         <p className="text-sm text-zinc-400 mb-6">
-          Set up your interviewer memory by uploading your resume and adding
-          your GitHub link.
+          Enter the role you are hiring for and the candidate&apos;s GitHub
+          username or profile. The interview will be tailored to both.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              Resume (PDF or Text)
+              Target role
             </label>
-            <label className="flex flex-col items-center justify-center border border-dashed border-zinc-700 rounded-xl p-4 cursor-pointer hover:bg-zinc-800/50 transition-colors">
-              <Upload className="w-5 h-5 text-zinc-400 mb-1" />
-              <span className="text-sm text-zinc-300">
-                {file ? file.name : 'Select or drag file'}
-              </span>
-              <input
-                type="file"
-                accept=".pdf,.txt"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-              />
-            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Senior Backend Engineer"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-3 px-4 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            />
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              GitHub URL
+              Candidate GitHub
             </label>
             <div className="relative">
               <svg
@@ -96,9 +102,9 @@ export function ProfileModal({ onComplete }: ProfileModalProps) {
                 <path d="M9 18c-4.51 2-5-2-7-2" />
               </svg>
               <input
-                type="url"
+                type="text"
                 required
-                placeholder="https://github.com/username"
+                placeholder="username or https://github.com/username"
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-3 pl-11 pr-4 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
@@ -118,10 +124,10 @@ export function ProfileModal({ onComplete }: ProfileModalProps) {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Analyzing Profile...
+                Preparing Interview...
               </>
             ) : (
-              'Initialize Memory'
+              'Start Interview'
             )}
           </button>
         </form>

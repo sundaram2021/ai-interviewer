@@ -42,8 +42,9 @@ export async function transcribeAudio(
     type: normalizedMimeType,
   });
   formData.append('file', blob, filename);
-  formData.append('model', 'saaras:v3');
+  formData.append('model', 'saaras:v4');
   formData.append('mode', 'transcribe');
+  formData.append('language_code', 'en-IN');
 
   const response = await fetch('https://api.sarvam.ai/speech-to-text', {
     method: 'POST',
@@ -55,11 +56,21 @@ export async function transcribeAudio(
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Sarvam STT failed: ${response.status} - ${errText}`);
+    let message = errText;
+    try {
+      const parsed = JSON.parse(errText) as {
+        error?: { message?: string };
+        detail?: string;
+      };
+      message = parsed.error?.message || parsed.detail || errText;
+    } catch {
+      // Keep the raw response when it is not JSON.
+    }
+    throw new Error(`Speech-to-text failed: ${message}`);
   }
 
   const data = await response.json();
-  return data.transcript || data.text || '';
+  return (data.transcript || data.text || '').trim();
 }
 
 export async function synthesizeSpeech(text: string) {

@@ -1,8 +1,15 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 
 type StartRecordingOptions = {
   autoStopOnSilence?: boolean;
 };
+
+interface AudioRecorderOptions {
+  lastSpeechAtRef?: MutableRefObject<number>;
+}
+
+const SILENCE_TIMEOUT_MS = 4000;
+const MIN_RECORDING_MS = 1200;
 
 type WindowWithWebkitAudio = Window & {
   webkitAudioContext?: typeof AudioContext;
@@ -24,9 +31,12 @@ function extensionForMimeType(mimeType: string) {
   return 'webm';
 }
 
-export function useAudioRecorder() {
+export function useAudioRecorder({
+  lastSpeechAtRef,
+}: AudioRecorderOptions = {}) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -34,6 +44,8 @@ export function useAudioRecorder() {
   const maxRecordingTimerRef = useRef<number | null>(null);
   const stopPromiseRef = useRef<Promise<string> | null>(null);
   const resolveStopRef = useRef<((transcript: string) => void) | null>(null);
+  const hitMaxRef = useRef(false);
+  const hadSpeechRef = useRef(false);
 
   const stopStreamTracks = useCallback(() => {
     if (mediaRecorderRef.current?.stream) {
@@ -107,8 +119,17 @@ export function useAudioRecorder() {
         }
 
         const volume = Math.sqrt(total / samples.length);
-        const elapsed = Date.now() - startedAt;
+        const now = Date.now();
+        const elapsed = now - startedAt;
+        const externalSpeechAt = lastSpeechAtRef?.current ?? 0;
+        const externalValid = externalSpeechAt >= startedAt;
+        const externalRecentlyActive =
+          externalValid && now - externalSpeechAt < 1500;
         const isVoice = volume > 0.025;
+
+        if (isVoice || externalRecentlyActive) {
+          hadSpeechRef.current = true;
+        }
 
         if (isVoice) {
           startedSpeaking = true;
@@ -116,24 +137,35 @@ export function useAudioRecorder() {
           return;
         }
 
-        if (!startedSpeaking || elapsed < 1200) return;
+        if (externalRecentlyActive) {
+          startedSpeaking = true;
+        }
 
-        quietSince = quietSince || Date.now();
-        if (Date.now() - quietSince > 1300) {
+        if (!startedSpeaking || elapsed < MIN_RECORDING_MS) return;
+
+        quietSince = quietSince || now;
+        const lastActivity = Math.max(
+          quietSince,
+          externalValid ? externalSpeechAt : 0
+        );
+        if (now - lastActivity > SILENCE_TIMEOUT_MS) {
           void stopRecording();
         }
       }, 160);
     },
-    [stopRecording]
+    [lastSpeechAtRef, stopRecording]
   );
 
   const startRecording = useCallback(
     async (options: StartRecordingOptions = {}) => {
       try {
+        setError(null);
         if (mediaRecorderRef.current?.state === 'recording') {
           return stopPromiseRef.current || Promise.resolve('');
         }
 
+        hitMaxRef.current = false;
+        hadSpeechRef.current = false;
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -170,6 +202,10 @@ export function useAudioRecorder() {
           stopStreamTracks();
 
           try {
+            if (audioBlob.size === 0) {
+              throw new Error('No audio was captured. Please try again.');
+            }
+
             const formData = new FormData();
             formData.append('file', audioBlob, `audio.${extension}`);
 
@@ -178,11 +214,22 @@ export function useAudioRecorder() {
               body: formData,
             });
 
-            if (!res.ok) throw new Error('STT Request failed');
+            if (!res.ok) {
+              const data = (await res.json().catch(() => null)) as {
+                error?: string;
+              } | null;
+              throw new Error(data?.error || 'Speech-to-text request failed.');
+            }
             const data = await res.json();
+            setError(null);
             resolveStopRef.current?.(data.transcript || '');
           } catch (error) {
             console.error('Transcription failed:', error);
+            setError(
+              error instanceof Error
+                ? error.message
+                : 'Speech-to-text request failed.'
+            );
             resolveStopRef.current?.('');
           } finally {
             setIsTranscribing(false);
@@ -195,10 +242,12 @@ export function useAudioRecorder() {
         setIsRecording(true);
 
         if (options.autoStopOnSilence) {
+          hitMaxRef.current = false;
           startSilenceDetection(stream);
           maxRecordingTimerRef.current = window.setTimeout(() => {
+            hitMaxRef.current = true;
             void stopRecording();
-          }, 45000);
+          }, 28000);
         }
 
         return stopPromiseRef.current;
@@ -239,6 +288,9 @@ export function useAudioRecorder() {
   return {
     isRecording,
     isTranscribing,
+    error,
+    hadSpeechRef,
+    hitMaxRef,
     cancelRecording,
     startRecording,
     stopRecording,

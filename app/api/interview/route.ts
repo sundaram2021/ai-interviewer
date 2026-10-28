@@ -1,57 +1,121 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { withSupermemory } from '@supermemory/tools/ai-sdk';
-import { generateText, gateway } from 'ai';
-
-if (!process.env.AI_GATEWAY_API_KEY && process.env.VERCEL_AI_API_KEY) {
-  process.env.AI_GATEWAY_API_KEY = process.env.VERCEL_AI_API_KEY;
-}
+import { APICallError, generateText, stepCountIs } from 'ai';
+import { anthropicModel, replyProviderOptions } from '@/lib/llm';
+import { normalizeContext, STARTER_MESSAGE } from '@/lib/context';
+import { getBudgets, projectTokens, shouldCompact } from '@/lib/context-budget';
+import { buildModelMessages, compactContext } from '@/lib/compaction';
+import { buildCachedSystem } from '@/lib/prompts';
+import { searchWebTool } from '@/lib/interview-tools';
+import type { InterviewResponseBody } from '@/lib/types';
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function isRejectedBlockError(error: unknown) {
+  return (
+    error instanceof APICallError &&
+    (error.statusCode === 400 || error.statusCode === 422)
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { messages, userId } = await req.json();
+    const body = await req.json();
+    const userId =
+      typeof body.userId === 'string' ? body.userId.slice(0, 200) : '';
+    const profile =
+      typeof body.profile === 'string' ? body.profile.slice(0, 24_000) : '';
+    const targetRole =
+      typeof body.targetRole === 'string'
+        ? body.targetRole.replace(/\s+/g, ' ').trim().slice(0, 120)
+        : '';
+    const candidateName =
+      typeof body.candidateName === 'string'
+        ? body.candidateName.replace(/\s+/g, ' ').trim().slice(0, 80)
+        : '';
 
     if (!userId) {
       return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
     }
 
-    const modelName = (
-      process.env.REASONING_MODEL || 'deepseek/deepseek-v4-flash'
-    ).replace(/['"]/g, '');
-    const baseModel = gateway(modelName);
-    const modelWithMemory = withSupermemory(baseModel, {
-      containerTag: userId,
-      customId: `interview-${userId}`,
-      mode: 'profile',
-    });
+    let context = normalizeContext(body.context);
+    if (context.messages.length === 0) {
+      context = { ...context, messages: [STARTER_MESSAGE] };
+    }
 
-    const systemPrompt = `You are a professional, helpful AI voice interviewer.
-Conduct a friendly but rigorous technical interview based on the user's profile and resume.
+    const budgets = getBudgets();
+    const projectedTokens = projectTokens(context, profile);
+    let compacted = false;
+    let compactionMethod: 'native' | 'manual' | null = null;
 
-Instructions:
-1. Speak clearly, concisely (max 2-3 sentences per turn), and naturally.
-2. Ask one technical or behavioral question at a time.
-3. React to the candidate's answer first, then ask the follow-up.
-4. Avoid any text formatting like markdown asterisks, bullet points, headers, or emojis, since your output will be directly read aloud by a Text-to-Speech system.`;
+    if (shouldCompact(projectedTokens, context, budgets.retryGapMessages)) {
+      const outcome = await compactContext({
+        context,
+        profile,
+        targetRole,
+        candidateName,
+        projectedTokens,
+      });
+      context = outcome.context;
+      compacted = outcome.compacted;
+      compactionMethod = outcome.method;
+    }
 
-    const history =
-      messages && messages.length > 0
-        ? messages
-        : [{ role: 'user', content: 'Hi, I am ready to start my interview.' }];
+    const system = buildCachedSystem(profile, targetRole, candidateName);
+    const generateReply = () =>
+      generateText({
+        model: anthropicModel,
+        system,
+        messages: buildModelMessages(context),
+        tools: { search_web: searchWebTool },
+        stopWhen: stepCountIs(4),
+        maxOutputTokens: 300,
+        providerOptions: replyProviderOptions,
+      });
 
-    const response = await generateText({
-      model: modelWithMemory,
-      system: systemPrompt,
-      messages: history,
-    });
+    let result;
+    try {
+      result = await generateReply();
+    } catch (error) {
+      if (!context.nativeBlock || !context.summary) throw error;
+      if (!isRejectedBlockError(error)) throw error;
+      console.error(
+        'Native compaction block could not be replayed; using text summary.',
+        error
+      );
+      context = { ...context, nativeBlock: null };
+      result = await generateReply();
+    }
 
-    return NextResponse.json({
+    const content = result.text.trim();
+    if (!content) throw new Error('Model returned an empty response');
+
+    const usage = {
+      inputTokens: result.usage.inputTokens ?? 0,
+      outputTokens: result.usage.outputTokens ?? 0,
+      cacheReadTokens: result.usage.inputTokenDetails.cacheReadTokens ?? 0,
+      cacheWriteTokens: result.usage.inputTokenDetails.cacheWriteTokens ?? 0,
+    };
+
+    context = {
+      ...context,
+      baseline: {
+        inputTokens: usage.inputTokens || projectTokens(context, profile),
+        messageCount: context.messages.length,
+      },
+    };
+
+    const payload: InterviewResponseBody = {
       role: 'assistant',
-      content: response.text,
-    });
+      content,
+      context,
+      compacted,
+      compactionMethod,
+      usage,
+    };
+
+    return NextResponse.json(payload);
   } catch (error: unknown) {
     console.error('Interview route error:', error);
     return NextResponse.json(

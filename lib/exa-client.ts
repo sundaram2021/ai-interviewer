@@ -1,13 +1,38 @@
 import Exa from 'exa-js';
 
-if (!process.env.EXA_API_KEY) {
-  throw new Error('Missing EXA_API_KEY environment variable');
+let exaClient: Exa | null = null;
+
+function getExa() {
+  const apiKey = process.env.EXA_API_KEY;
+  if (!apiKey) throw new Error('Missing EXA_API_KEY environment variable');
+  if (!exaClient) exaClient = new Exa(apiKey);
+  return exaClient;
 }
 
-const exa = new Exa(process.env.EXA_API_KEY);
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  text: string;
+}
+
+export async function searchWeb(query: string): Promise<WebSearchResult[]> {
+  const exa = getExa();
+  const response = await exa.search(query, {
+    numResults: 4,
+    useAutoprompt: false,
+    contents: { text: { maxCharacters: 1_500 } },
+  });
+
+  return response.results.map((result) => ({
+    title: result.title || result.url,
+    url: result.url,
+    text: result.text || '',
+  }));
+}
 
 export async function scrapeGithubProfile(githubUrl: string) {
   try {
+    const exa = getExa();
     const response = await exa.getContents([githubUrl], {
       text: { maxCharacters: 5000 },
     });

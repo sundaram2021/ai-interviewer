@@ -1,3 +1,8 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@ai-sdk/anthropic@4.0.91'
+  - '@ai-sdk/gateway@4.0.129'
+  - '@ai-sdk/provider-utils@5.0.70'
+  - ai@7.0.156
