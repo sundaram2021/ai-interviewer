@@ -1,0 +1,21 @@
+AGENTS.md
+  s_bf7dd0f14b3074::t_f79235340b6d79 6-79
+CLAUDE.md
+  s_bf7dd0f14b3074::t_293b10faa44e35 2-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6dce60911243057cacf0159a5e400946ef37b552",
+  "prompts": {},
+  "sessions": {
+    "s_bf7dd0f14b3074": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e7c1f2078ffeDtqYWwzzHp6qMb",
+        "model": "unknown"
+      },
+      "human_author": "Sundaram Kumar Jha <jhasundaram@outlook.com>"
+    }
+  }
+}
